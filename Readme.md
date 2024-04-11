@@ -16,3 +16,6 @@ bcrypt help-s tp hash password
 
 jwt is a bearer token
 bearer token: anyone send me this token, ill send the data
+
+console logged request body, request files and cloudinary response
+![No Image](./public/temp/image.png)
