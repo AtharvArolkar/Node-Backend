@@ -2,7 +2,10 @@ import { User } from '../models/user.model.js';
 import { ApiError } from '../utils/ApiError.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { uploadOnCloudinary } from '../utils/cloudinary.js';
+import {
+  deleteFromCloudinary,
+  uploadOnCloudinary,
+} from '../utils/cloudinary.js';
 import jwt from 'jsonwebtoken';
 
 const generateAccessAndRefreshTokens = async (userId) => {
@@ -67,28 +70,36 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new ApiError(500, 'Internal server error');
   }
 
-  const user = await User.create({
-    fullName,
-    avatar: avatar.url,
-    userName,
-    email,
-    password,
-    coverImage: coverImage?.url ?? '',
-  });
+  try {
+    const user = await User.create({
+      fullName,
+      avatar: avatar.url,
+      userName,
+      email,
+      password,
+      coverImage: coverImage?.url ?? '',
+    });
 
-  const checkIfUserCreated = await User.findById(user._id).select(
-    '-password -refreshToken'
-  );
-
-  if (!checkIfUserCreated) {
-    throw new ApiError(500, 'Error occured while registering the user');
-  }
-
-  return res
-    .status(201)
-    .json(
-      new ApiResponse(201, checkIfUserCreated, 'Successfully created the user')
+    const checkIfUserCreated = await User.findById(user._id).select(
+      '-password -refreshToken'
     );
+
+    if (!checkIfUserCreated) {
+      throw new ApiError(500, 'Error occured while registering the user');
+    }
+
+    return res
+      .status(201)
+      .json(
+        new ApiResponse(
+          201,
+          checkIfUserCreated,
+          'Successfully created the user'
+        )
+      );
+  } catch (error) {
+    throw new ApiError(500, 'Internal server error');
+  }
 });
 
 const loginUser = asyncHandler(async (req, res) => {
@@ -117,51 +128,59 @@ const loginUser = asyncHandler(async (req, res) => {
     throw new ApiError(401, 'Invalid user credentials');
   }
 
-  const { refreshToken, accessToken } = await generateAccessAndRefreshTokens(
-    searchUser._id
-  );
-
-  const loggedInuser = await User.findById(searchUser._id).select(
-    '-password -refreshToken'
-  );
-
-  const options = {
-    httpOnly: true,
-    secure: true,
-  };
-
-  return res
-    .status(200)
-    .cookie('accessToken', accessToken, options)
-    .cookie('refreshToken', refreshToken, options)
-    .json(
-      new ApiResponse(
-        200,
-        {
-          user: loggedInuser,
-          accessToken,
-          refreshToken,
-        },
-        'User logged in successfully'
-      )
+  try {
+    const { refreshToken, accessToken } = await generateAccessAndRefreshTokens(
+      searchUser._id
     );
+
+    const loggedInuser = await User.findById(searchUser._id).select(
+      '-password -refreshToken'
+    );
+
+    const options = {
+      httpOnly: true,
+      secure: true,
+    };
+
+    return res
+      .status(200)
+      .cookie('accessToken', accessToken, options)
+      .cookie('refreshToken', refreshToken, options)
+      .json(
+        new ApiResponse(
+          200,
+          {
+            user: loggedInuser,
+            accessToken,
+            refreshToken,
+          },
+          'User logged in successfully'
+        )
+      );
+  } catch (error) {
+    throw new ApiError(500, 'Internal server error');
+  }
 });
 
 const logoutUser = asyncHandler(async (req, res) => {
   //clear cookies
   // remove refresh token from db
 
-  await User.findByIdAndUpdate(
-    req.user._id,
-    {
-      $set: {
-        refreshToken: undefined,
+  try {
+    await User.findByIdAndUpdate(
+      req.user._id,
+      {
+        $set: {
+          refreshToken: undefined,
+        },
       },
-    },
-    {
-      new: true, // will return the updated object
-    }
-  );
+      {
+        new: true, // will return the updated object
+      }
+    );
+  } catch (error) {
+    throw new ApiError(500, 'Internal server error');
+  }
 
   const options = {
     httpOnly: true,
@@ -223,20 +242,27 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 const changeCurrentUserPassword = asyncHandler(async (req, res) => {
   const { oldPassword, newPassword } = req.body;
 
-  const user = await User.findById(req.user?._id);
+  try {
+    const user = await User.findById(req.user?._id);
 
-  const isPasswordCorrect = await user.isPasswordCorrect(oldPassword);
+    const isPasswordCorrect = await user.isPasswordCorrect(oldPassword);
 
-  if (!isPasswordCorrect) {
-    throw new ApiError(400, 'Invalid password');
+    if (!isPasswordCorrect) {
+      throw new ApiError(400, 'Invalid password');
+    }
+
+    user.password = newPassword;
+    await user.save({ validateBeforeSave: false });
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, {}, 'Password changes successfulyy'));
+  } catch (error) {
+    throw new ApiError(
+      500,
+      'internal server error occured while updating the password'
+    );
   }
-
-  user.password = newPassword;
-  await user.save({ validateBeforeSave: false });
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, {}, 'Password changes successfulyy'));
 });
 
 const getCurrentuser = asyncHandler(async (req, res) => {
@@ -253,22 +279,40 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'Send atleast one field to update');
   }
 
-  const user = User.findByIdAndUpdate(
-    req.user?._id,
-    {
-      $set: email && {
-        email,
-      },
-      $set: fullName && {
-        fullName,
-      },
-    },
-    { new: true }
-  ).select('-password -refreshToken');
+  const updateDetails = {};
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, user, 'Account details updated successfully'));
+  if (email) {
+    updateDetails.email = email;
+  }
+
+  if (fullName) {
+    updateDetails.fullName = fullName;
+  }
+
+  try {
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user?._id,
+      {
+        $set: updateDetails,
+      },
+      { new: true }
+    ).select('-password -refreshToken');
+
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          updatedUser,
+          'Account details updated successfully'
+        )
+      );
+  } catch (error) {
+    throw new ApiError(
+      500,
+      'Internale server error occured while updating the account details'
+    );
+  }
 });
 
 const updateUserAvatar = asyncHandler(async (req, res) => {
@@ -284,19 +328,27 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
     throw new ApiError(500, 'Internal server error');
   }
 
-  const user = User.findByIdAndUpdate(
-    req.user?._id,
-    {
-      $set: {
-        avatar: avatar.url,
-      },
-    },
-    { new: true }
-  ).select('-password -refreshToken');
+  try {
+    const user = await User.findById(req.user?._id).select(
+      '-password -refreshToken'
+    );
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, user, 'Avatar updated successfully'));
+    const oldAvatarUrl = user.avatar;
+
+    user.avatar = avatar.url;
+
+    await user.save({ validateBeforeSave: false });
+
+    await deleteFromCloudinary(oldAvatarUrl);
+    return res
+      .status(200)
+      .json(new ApiResponse(200, user, 'Avatar updated successfully'));
+  } catch (error) {
+    throw new ApiError(
+      500,
+      'Internal server error occured while updating the avatar image'
+    );
+  }
 });
 
 const updateUserCoverImage = asyncHandler(async (req, res) => {
@@ -306,25 +358,34 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'Cover image file is required');
   }
 
-  const coverImage = await uploadOnCloudinary(newAvatarLocalpath);
+  const coverImage = await uploadOnCloudinary(newCoverLocalpath);
 
   if (!coverImage.url) {
     throw new ApiError(500, 'Internal server error');
   }
 
-  const user = User.findByIdAndUpdate(
-    req.user?._id,
-    {
-      $set: {
-        coverImage: coverImage.url,
-      },
-    },
-    { new: true }
-  ).select('-password -refreshToken');
+  try {
+    const user = await User.findById(req.user?._id).select(
+      '-password -refreshToken'
+    );
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, user, 'Cover image updated successfully'));
+    const oldCoverImageUrl = user.coverImage;
+
+    user.coverImage = coverImage.url;
+
+    await user.save({ validateBeforeSave: false });
+
+    await deleteFromCloudinary(oldCoverImageUrl);
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, user, 'Cover image updated successfully'));
+  } catch (error) {
+    throw new ApiError(
+      500,
+      'Internal server error occured while updating the cover image'
+    );
+  }
 });
 
 export {
