@@ -26,10 +26,10 @@ app.use(cookieParser());
 //routes import
 
 import userRouter from './routes/user.routes.js';
-import { userBase } from './routes/routes.js';
+import { userBaseRoute } from './routes/routes.js';
 
 //routes declaration
 
-app.use(userBase, userRouter);
+app.use(userBaseRoute, userRouter);
 
 export { app };
