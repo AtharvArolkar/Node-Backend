@@ -99,12 +99,12 @@ const loginUser = asyncHandler(async (req, res) => {
   // generate access and refresh token
   // send secure cookies
 
-  const { email, username, password } = req.body;
-  if (!username || !email) {
+  const { email, userName, password } = req.body;
+  if (!(userName || email)) {
     throw new ApiError(400, 'Username or email is required');
   }
 
-  const searchUser = await User.findOne({ $or: [{ username }, { email }] });
+  const searchUser = await User.findOne({ $or: [{ userName }, { email }] });
 
   if (!searchUser) {
     throw new ApiError(404, 'User does not exist');
@@ -120,7 +120,7 @@ const loginUser = asyncHandler(async (req, res) => {
     searchUser._id
   );
 
-  searchUser = await User.findById(searchUser._id).select(
+  const loggedInuser = await User.findById(searchUser._id).select(
     '-password -refreshToken'
   );
 
@@ -137,7 +137,7 @@ const loginUser = asyncHandler(async (req, res) => {
       new ApiResponse(
         200,
         {
-          user: searchUser,
+          user: loggedInuser,
           accessToken,
           refreshToken,
         },
@@ -169,8 +169,8 @@ const logoutUser = asyncHandler(async (req, res) => {
 
   return res
     .status(200)
-    .clearCookie('accessToken'.options)
-    .clearCookie('refreshToken'.options)
+    .clearCookie('accessToken', options)
+    .clearCookie('refreshToken', options)
     .json(new ApiResponse(200, {}, 'User logged out'));
 });
 
