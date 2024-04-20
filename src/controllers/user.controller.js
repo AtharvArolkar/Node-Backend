@@ -4,6 +4,25 @@ import { ApiResponse } from '../utils/ApiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { uploadOnCloudinary } from '../utils/cloudinary.js';
 
+const generateAccessAndRefreshTokens = async (userId) => {
+  try {
+    const user = await User.findById(userId);
+
+    const refreshToken = user.generateRefreshToken();
+    const accessToken = user.generateAccessToken();
+
+    user.refreshToken = refreshToken;
+    await user.save({ validateBeforeSave: false });
+
+    return { refreshToken, accessToken };
+  } catch (error) {
+    throw new ApiError(
+      500,
+      'Something went wrong while generate access and refresh token'
+    );
+  }
+};
+
 const registerUser = asyncHandler(async (req, res) => {
   //get user details from frontend
   // validation - not empty
@@ -35,7 +54,7 @@ const registerUser = asyncHandler(async (req, res) => {
 
   const avatarLocalPath = req.files?.avatar[0]?.path;
   const coverImageLocalPath = req.files?.coverImage?.[0]?.path;
-  
+
   if (!avatarLocalPath) {
     throw ApiError(400, 'Avatar file is required');
   }
@@ -71,4 +90,88 @@ const registerUser = asyncHandler(async (req, res) => {
     );
 });
 
-export { registerUser };
+const loginUser = asyncHandler(async (req, res) => {
+  // get user details from frontend from req body
+  // username or email
+  // find the user
+  // if found, password check, if user not found, send response sayong user does not exist
+  // if password is wrong, send response back saying invalid password or username
+  // generate access and refresh token
+  // send secure cookies
+
+  const { email, username, password } = req.body;
+  if (!username || !email) {
+    throw new ApiError(400, 'Username or email is required');
+  }
+
+  const searchUser = await User.findOne({ $or: [{ username }, { email }] });
+
+  if (!searchUser) {
+    throw new ApiError(404, 'User does not exist');
+  }
+
+  const isPasswordValid = await searchUser.isPasswordCorrect(password);
+
+  if (!isPasswordValid) {
+    throw new ApiError(401, 'Invalid user credentials');
+  }
+
+  const { refreshToken, accessToken } = await generateAccessAndRefreshTokens(
+    searchUser._id
+  );
+
+  searchUser = await User.findById(searchUser._id).select(
+    '-password -refreshToken'
+  );
+
+  const options = {
+    httpOnly: true,
+    secure: true,
+  };
+
+  return res
+    .status(200)
+    .cookie('accessToken', accessToken, options)
+    .cookie('refreshToken', refreshToken, options)
+    .json(
+      new ApiResponse(
+        200,
+        {
+          user: searchUser,
+          accessToken,
+          refreshToken,
+        },
+        'User logged in successfully'
+      )
+    );
+});
+
+const logoutUser = asyncHandler(async (req, res) => {
+  //clear cookies
+  // remove refresh token from db
+
+  await User.findByIdAndUpdate(
+    req.user._id,
+    {
+      $set: {
+        refreshToken: undefined,
+      },
+    },
+    {
+      new: true, // will return the updated object
+    }
+  );
+
+  const options = {
+    httpOnly: true,
+    secure: true,
+  };
+
+  return res
+    .status(200)
+    .clearCookie('accessToken'.options)
+    .clearCookie('refreshToken'.options)
+    .json(new ApiResponse(200, {}, 'User logged out'));
+});
+
+export { registerUser, loginUser, logoutUser };
