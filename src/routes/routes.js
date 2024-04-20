@@ -7,4 +7,5 @@ export const userRoutes = {
   register: '/register',
   login: '/login',
   logout: '/logout',
+  refreshAccessToken: '/refreshAccessToken',
 };
